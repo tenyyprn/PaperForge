@@ -1,0 +1,63 @@
+[project]
+name = "paperforge"
+version = "0.1.0"
+description = "論文を自分の知識資産に変えるパーソナルナレッジエージェント"
+readme = "readme.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Kosuke Orihara" }]
+
+dependencies = [
+    # ADK & Gemini
+    "google-adk>=0.1.0",
+    "google-cloud-aiplatform>=1.40.0",
+    # API
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.7",
+    # Database
+    "google-cloud-firestore>=2.14.0",
+    # Utilities
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "httpx>=0.26.0",
+]
+
+[project.optional-dependencies]
+fine-tuning = [
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "peft>=0.7.0",
+    "bitsandbytes>=0.42.0",
+    "datasets>=2.16.0",
+    "accelerate>=0.25.0",
+    "trl>=0.7.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

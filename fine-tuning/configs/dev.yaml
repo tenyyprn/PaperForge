@@ -1,0 +1,28 @@
+# 開発用設定
+model:
+  name: "google/gemma-2-2b"
+  quantization: "4bit"
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.1
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+
+training:
+  batch_size: 2
+  gradient_accumulation_steps: 4
+  learning_rate: 2e-4
+  num_epochs: 3
+  max_seq_length: 2048
+  warmup_ratio: 0.1
+
+data:
+  train_path: "data/processed/train.jsonl"
+  eval_path: "data/processed/eval.jsonl"
+
+output:
+  dir: "outputs/dev"
+  save_steps: 100

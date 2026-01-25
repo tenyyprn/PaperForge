@@ -1,0 +1,30 @@
+# 本番用設定（Cloud GPU）
+model:
+  name: "google/gemma-2-9b"
+  quantization: "4bit"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+
+training:
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 1e-4
+  num_epochs: 5
+  max_seq_length: 4096
+  warmup_ratio: 0.1
+
+data:
+  train_path: "data/processed/train.jsonl"
+  eval_path: "data/processed/eval.jsonl"
+
+output:
+  dir: "outputs/prod"
+  save_steps: 500
