@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -132,17 +133,28 @@ async def generate_learning_path(request: LearningPathRequest):
 JSON形式で回答してください。"""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[{"role": "user", "parts": [{"text": user_prompt}]}],
-            config={
-                "system_instruction": SYSTEM_PROMPT,
-                "response_mime_type": "application/json",
-            },
-        )
+        # リトライ付きAPI呼び出し
+        response_text = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[{"role": "user", "parts": [{"text": user_prompt}]}],
+                    config={
+                        "system_instruction": SYSTEM_PROMPT,
+                        "response_mime_type": "application/json",
+                    },
+                )
+                response_text = response.text
+                break
+            except Exception as retry_e:
+                if ("429" in str(retry_e) or "RESOURCE_EXHAUSTED" in str(retry_e)) and attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
 
         # JSONをパース
-        result = json.loads(response.text)
+        result = json.loads(response_text)
 
         steps = [
             LearningStep(
@@ -161,6 +173,7 @@ JSON形式で回答してください。"""
         )
 
     except Exception as e:
+        error_str = str(e)
         # エラー時は概念順に返す
         steps = [
             LearningStep(
@@ -172,7 +185,11 @@ JSON形式で回答してください。"""
             )
             for i, c in enumerate(request.concepts)
         ]
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            summary = "APIのレート制限に達しました。少し時間を置いてから再生成してください。（登録順で仮表示中）"
+        else:
+            summary = f"学習パス生成中にエラーが発生しました: {error_str}"
         return LearningPathResponse(
             steps=steps,
-            summary=f"学習パス生成中にエラーが発生しました: {str(e)}"
+            summary=summary
         )
