@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -94,6 +94,7 @@ class AgentResponse(BaseModel):
 
 # セッション管理（インメモリ）
 _sessions: dict[str, list[AgentActivity]] = {}
+_session_results: dict[str, dict] = {}
 
 
 def create_activity(
@@ -483,6 +484,42 @@ async def run_pipeline_task(text: str, filename: str, session_id: str, user_id: 
         }
 
 
+@router.post("/start")
+async def start_pipeline(request: AgentRequest, background_tasks: BackgroundTasks):
+    """パイプラインをバックグラウンドで開始し、session_idを即座に返す"""
+    session_id = str(uuid.uuid4())
+    _sessions[session_id] = []
+
+    async def _run_and_store(coro_func, *args):
+        result = await coro_func(*args)
+        _session_results[session_id] = result
+
+    if request.task == "pipeline":
+        background_tasks.add_task(
+            _run_and_store,
+            run_pipeline_task,
+            request.input,
+            request.filename or "unknown.pdf",
+            session_id,
+        )
+    elif request.task == "quiz":
+        background_tasks.add_task(
+            _run_and_store,
+            run_quiz_task,
+            request.concepts,
+            session_id,
+        )
+    else:
+        background_tasks.add_task(
+            _run_and_store,
+            run_extraction_task,
+            request.input,
+            session_id,
+        )
+
+    return {"session_id": session_id}
+
+
 @router.post("/run", response_model=AgentResponse)
 async def run_agent(request: AgentRequest):
     """エージェントタスクを実行"""
@@ -514,7 +551,9 @@ async def stream_activities(session_id: str):
     """エージェント活動をストリーミング（SSE）"""
     async def generate() -> AsyncGenerator[str, None]:
         last_count = 0
-        while True:
+        timeout = 300  # 5分
+        elapsed = 0.0
+        while elapsed < timeout:
             activities = _sessions.get(session_id, [])
             if len(activities) > last_count:
                 for activity in activities[last_count:]:
@@ -523,9 +562,13 @@ async def stream_activities(session_id: str):
 
                 # 完了チェック
                 if activities and activities[-1].status == "completed" and activities[-1].agent_id == "orchestrator":
+                    await asyncio.sleep(0.1)  # 結果の格納を待つ
+                    result = _session_results.get(session_id, {})
+                    yield f"event: done\ndata: {json.dumps(result)}\n\n"
                     break
 
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.3)
+            elapsed += 0.3
 
     return StreamingResponse(
         generate(),

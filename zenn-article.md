@@ -110,7 +110,7 @@ Google ADKで構築した**Tutor Agent**と自然言語で対話しながら学�
 
 ### 8. 理解度クイズ
 
-登録した概念から**難易度別のクイズ**（かんたん・ふつう・むずかしい）を自動生成。4択問題と○×問題を組み合わせ、正答率をスコア表示します。知識の定着度を客観的に測定できます。
+登録した概念から**4択クイズ**を自動生成し、正答率をスコア表示します。学習チャット（Tutor Agent）経由では**3段階の難易度**（かんたん・ふつう・むずかしい）を指定してクイズを生成することも可能です。知識の定着度を客観的に測定できます。
 
 ### 9. Firestore永続化
 
@@ -126,7 +126,7 @@ Google ADKで構築した**Tutor Agent**と自然言語で対話しながら学�
 │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘     │
 │  Zustand（永続化ストア）+ Agent Activity Panel               │
 └─────────────────────┬───────────────────────────────────────┘
-                      │ REST API
+                      │ REST API + SSE（Server-Sent Events）
 ┌─────────────────────▼───────────────────────────────────────┐
 │  Backend（FastAPI + Cloud Run）                               │
 │  /papers  /graph  /chat  /learning-path  /adk  /agents      │
@@ -167,7 +167,7 @@ Google ADKで構築した**Tutor Agent**と自然言語で対話しながら学�
 | フロントエンド | React + TypeScript + Vite | SPA UI |
 | 状態管理 | Zustand (persist) | グラフ・論文データのローカル永続化 |
 | 可視化 | react-force-graph-2d + Canvas API | ナレッジグラフ描画 |
-| バックエンド | FastAPI + Uvicorn | REST API |
+| バックエンド | FastAPI + Uvicorn | REST API + SSE ストリーミング |
 | データベース | **Firestore** | 概念・関係性・論文データの永続化 |
 | ベクトル検索 | Embeddings + コサイン類似度 | セマンティック検索・関係性提案 |
 | エージェント | **Google ADK** (Runner + FunctionTool) | マルチエージェントオーケストレーション |
@@ -245,7 +245,7 @@ async for event in runner.run_async(
     # → Agent Activity Panel にリアルタイム表示
 ```
 
-`runner.run_async()` が返すイベントストリームから、どのエージェントが何のツールを呼んでいるかをリアルタイムに取得し、フロントエンドに活動ログとして表示しています。
+`runner.run_async()` が返すイベントストリームから、どのエージェントが何のツールを呼んでいるかをリアルタイムに取得します。取得したアクティビティはサーバー側の `_sessions` dictに蓄積され、フロントエンドは **SSE（Server-Sent Events）** エンドポイント（`GET /api/agents/stream/{session_id}`）を通じて活動ログをリアルタイムに受信・表示します。
 
 ## Cloud RunとVertex AIの構成
 
@@ -323,7 +323,6 @@ Tutor Agentが「beginner / intermediate / advanced」のような選択肢を�
 ## 今後の展望
 
 - **Gemma LoRA**: 概念抽出タスクに特化したファインチューニングモデルの導入で、Gemini依存から脱却し抽出精度を向上
-- **ストリーミングパイプライン**: パイプライン実行をSSE（Server-Sent Events）でリアルタイムストリーミングし、各エージェントの進捗を即時反映
 - **共同ナレッジグラフ**: 複数ユーザーが同一のナレッジグラフを共有・編集し、研究チームでの知識共有を実現
 - **論文推薦**: 蓄積したナレッジグラフの空白領域を分析し、次に読むべき論文を自動推薦
 

@@ -1,6 +1,7 @@
 import axios from "axios";
 
 const API_BASE_URL =
+  localStorage.getItem("apiUrl") ||
   import.meta.env.VITE_API_URL ||
   (window.location.hostname === "localhost" ? "http://localhost:8001" : "");
 
@@ -10,6 +11,11 @@ export const apiClient = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+export function setApiBaseUrl(url: string) {
+  apiClient.defaults.baseURL = url;
+  localStorage.setItem("apiUrl", url);
+}
 
 export interface PaperSummary {
   title: string;
@@ -209,6 +215,54 @@ export async function runPipeline(
     concepts,
   });
   return response.data;
+}
+
+// SSE Streaming Pipeline API
+export async function startPipeline(
+  task: string,
+  input: string,
+  filename: string,
+  concepts: Concept[] = []
+): Promise<{ session_id: string }> {
+  const response = await apiClient.post<{ session_id: string }>("/api/agents/start", {
+    task,
+    input,
+    filename,
+    concepts,
+  });
+  return response.data;
+}
+
+export function streamActivities(
+  sessionId: string,
+  onActivity: (activity: AgentActivity) => void,
+  onDone: (result: Record<string, unknown>) => void,
+  onError: (error: Event) => void,
+): EventSource {
+  const baseUrl =
+    import.meta.env.VITE_API_URL ||
+    (window.location.hostname === "localhost" ? "http://localhost:8001" : "");
+  const url = `${baseUrl}/api/agents/stream/${sessionId}`;
+
+  const eventSource = new EventSource(url);
+
+  eventSource.onmessage = (event) => {
+    const activity: AgentActivity = JSON.parse(event.data);
+    onActivity(activity);
+  };
+
+  eventSource.addEventListener("done", (event) => {
+    const result = JSON.parse((event as MessageEvent).data || "{}");
+    eventSource.close();
+    onDone(result);
+  });
+
+  eventSource.onerror = (error) => {
+    eventSource.close();
+    onError(error);
+  };
+
+  return eventSource;
 }
 
 // Graph Sync API

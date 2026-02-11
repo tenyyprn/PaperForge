@@ -1,38 +1,57 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useGraphStore } from "../stores/graphStore";
 import { useLearningPathStore } from "../stores/learningPathStore";
+import { usePaperStore } from "../stores/paperStore";
+import { getGraphStats, setApiBaseUrl, apiClient } from "../api/client";
 
 export function SettingsPage() {
   const { concepts, relations, clearGraph } = useGraphStore();
   const { paths, clearPaths } = useLearningPathStore();
+  const { papers, clearPapers } = usePaperStore();
   const [apiUrl, setApiUrl] = useState(
-    localStorage.getItem("apiUrl") || "http://localhost:8001"
+    localStorage.getItem("apiUrl") || apiClient.defaults.baseURL || ""
   );
   const [saved, setSaved] = useState(false);
+  const [storageType, setStorageType] = useState<
+    "firestore" | "memory" | "checking" | "error"
+  >("checking");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [importMessage, setImportMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    getGraphStats()
+      .then((stats) => setStorageType(stats.storage))
+      .catch(() => setStorageType("error"));
+  }, []);
 
   const handleSaveApiUrl = () => {
-    localStorage.setItem("apiUrl", apiUrl);
+    setApiBaseUrl(apiUrl);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    // ストレージステータスを再チェック
+    getGraphStats()
+      .then((stats) => setStorageType(stats.storage))
+      .catch(() => setStorageType("error"));
   };
 
   const handleClearData = () => {
-    if (
-      confirm(
-        "すべてのデータをクリアしますか？この操作は元に戻せません。"
-      )
-    ) {
-      clearGraph();
-      clearPaths();
-      localStorage.removeItem("graph-storage");
-      localStorage.removeItem("paperforge-learning-paths");
-    }
+    clearGraph();
+    clearPaths();
+    clearPapers();
+    localStorage.removeItem("graph-storage");
+    localStorage.removeItem("paperforge-learning-paths");
+    localStorage.removeItem("paperforge-papers");
+    setShowClearConfirm(false);
   };
 
   const handleExportData = () => {
     const data = {
       concepts,
       relations,
+      papers,
       learningPaths: paths,
       exportedAt: new Date().toISOString(),
     };
@@ -67,21 +86,48 @@ export function SettingsPage() {
               savePath(lp.steps, lp.summary);
             }
           }
-          alert(`${data.concepts.length}件の概念をインポートしました`);
+          setImportMessage({
+            type: "success",
+            text: `${data.concepts.length}件の概念をインポートしました`,
+          });
+        } else {
+          setImportMessage({
+            type: "error",
+            text: "有効なデータが見つかりませんでした",
+          });
         }
       } catch {
-        alert("ファイルの読み込みに失敗しました");
+        setImportMessage({
+          type: "error",
+          text: "ファイルの読み込みに失敗しました",
+        });
       }
+      setTimeout(() => setImportMessage(null), 4000);
     };
     reader.readAsText(file);
+    // input をリセット
+    e.target.value = "";
   };
+
+  const totalItems = concepts.length + relations.length + papers.length + paths.length;
 
   return (
     <div className="settings-page page-container">
-      <h2>設定</h2>
+      <div className="settings-header">
+        <h2>設定</h2>
+        <p className="subtitle">アプリの設定とデータ管理</p>
+      </div>
 
       <section className="settings-section">
-        <h3>API設定</h3>
+        <div className="section-title">
+          <span className="section-icon">🔗</span>
+          <div>
+            <h3>API接続</h3>
+            <p className="section-desc">
+              バックエンドサーバーとの接続設定
+            </p>
+          </div>
+        </div>
         <div className="setting-item">
           <label htmlFor="api-url">APIサーバーURL</label>
           <div className="input-group">
@@ -96,15 +142,36 @@ export function SettingsPage() {
               {saved ? "保存しました" : "保存"}
             </button>
           </div>
-          <p className="setting-hint">
-            バックエンドAPIサーバーのURLを設定します
-          </p>
+        </div>
+        <div className="storage-status">
+          <span className="storage-label">ストレージ:</span>
+          {storageType === "checking" ? (
+            <span className="storage-badge checking">確認中...</span>
+          ) : storageType === "error" ? (
+            <span className="storage-badge offline">接続エラー</span>
+          ) : storageType === "firestore" ? (
+            <span className="storage-badge firestore">Firestore</span>
+          ) : (
+            <span className="storage-badge memory">ローカルのみ</span>
+          )}
         </div>
       </section>
 
       <section className="settings-section">
-        <h3>データ管理</h3>
+        <div className="section-title">
+          <span className="section-icon">📊</span>
+          <div>
+            <h3>データ管理</h3>
+            <p className="section-desc">
+              保存されたデータの確認・エクスポート・インポート
+            </p>
+          </div>
+        </div>
         <div className="data-stats">
+          <div className="stat-item">
+            <span className="stat-value">{papers.length}</span>
+            <span className="stat-label">論文</span>
+          </div>
           <div className="stat-item">
             <span className="stat-value">{concepts.length}</span>
             <span className="stat-label">概念</span>
@@ -120,7 +187,11 @@ export function SettingsPage() {
         </div>
 
         <div className="data-actions">
-          <button onClick={handleExportData} className="export-btn">
+          <button
+            onClick={handleExportData}
+            className="export-btn"
+            disabled={totalItems === 0}
+          >
             データをエクスポート
           </button>
           <label className="import-btn">
@@ -132,14 +203,51 @@ export function SettingsPage() {
               hidden
             />
           </label>
-          <button onClick={handleClearData} className="danger-btn">
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            className="danger-btn"
+            disabled={totalItems === 0}
+          >
             すべてのデータを削除
           </button>
         </div>
+
+        {importMessage && (
+          <div className={`settings-toast ${importMessage.type}`}>
+            {importMessage.text}
+          </div>
+        )}
+
+        {showClearConfirm && (
+          <div className="clear-confirm">
+            <p>
+              すべてのデータ（{concepts.length}概念、{relations.length}
+              関係性、{papers.length}論文、{paths.length}
+              学習パス）を削除しますか？
+            </p>
+            <p className="clear-confirm-warn">この操作は元に戻せません。</p>
+            <div className="clear-confirm-actions">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="cancel-btn"
+              >
+                キャンセル
+              </button>
+              <button onClick={handleClearData} className="danger-btn">
+                削除する
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="settings-section">
-        <h3>アプリ情報</h3>
+        <div className="section-title">
+          <span className="section-icon">ℹ️</span>
+          <div>
+            <h3>アプリ情報</h3>
+          </div>
+        </div>
         <div className="app-info">
           <p>
             <strong>PaperForge</strong>
@@ -148,6 +256,14 @@ export function SettingsPage() {
           <p className="description">
             論文を自分の知識資産に変えるパーソナルナレッジエージェント
           </p>
+          <a
+            href="https://github.com/tenyyprn/PaperForge"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="github-link"
+          >
+            GitHub リポジトリ
+          </a>
         </div>
       </section>
     </div>

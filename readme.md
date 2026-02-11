@@ -25,7 +25,7 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 | 機能 | 説明 | Status |
 |------|------|:------:|
 | 📄 論文アップロード | PDFをアップロードして概念・関係性を自動抽出。起承転結の要約を日本語で生成 | Stable |
-| 🤖 マルチエージェントパイプライン | アップロード後、Extraction → Graph → Tutor Agent が自動連携。抽出から学習支援まで完全自動化 | Stable |
+| 🤖 マルチエージェントパイプライン | アップロード後、Extraction → Graph → Tutor Agent が自動連携。SSEストリーミングでリアルタイム進捗表示 | Stable |
 | 🕸️ ナレッジグラフ | 抽出した概念を階層構造で可視化。探索モードで接続概念をハイライト | Stable |
 | 🔍 セマンティック検索 | ベクトル埋め込みによる意味的類似検索。類似概念の発見と関係性の自動提案 | Stable |
 | 📅 タイムラインビュー | 論文の発表年に基づいてX軸に時系列配置。研究の発展を時間軸で俯瞰 | Stable |
@@ -35,9 +35,10 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 | 🤖 AI比較分析 | 論文の優劣・手法・貢献度に加え、引用関係の推定・時系列の発展を自動分析 | Stable |
 | 💬 学習チャット | ADK Tutor Agentと対話して知識を深める。クイックリプライで直感的に操作 | Stable |
 | 🗺️ 学習パス | 概念の依存関係を考慮した最適な学習順序を自動生成。進捗も永続化 | Stable |
-| ❓ 理解度クイズ | 登録した概念から難易度別クイズを生成。スコア表示で理解度を可視化 | Stable |
+| ❓ 理解度クイズ | 登録した概念から4択クイズを自動生成。チャット経由では3段階の難易度指定も可能 | Stable |
 | 🔥 Firestore永続化 | ナレッジグラフと論文データをFirestoreに保存。デバイス間同期に対応 | Stable |
-| ⚙️ データ管理 | JSON形式でエクスポート/インポート（学習パス含む） | Stable |
+| 📡 SSEストリーミング | パイプライン実行をSSE（Server-Sent Events）でリアルタイム配信。Activity Panelに1件ずつ表示 | Stable |
+| ⚙️ 設定・データ管理 | API接続設定、Firestoreステータス表示、JSON形式でエクスポート/インポート、UI内確認ダイアログ | Stable |
 
 ## 🎥 デモシナリオ
 
@@ -73,7 +74,7 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 | 論文比較（AI分析） | ◎ | × | △ | × |
 | 学習パス生成 | ◎ | × | × | × |
 | 理解度クイズ | ◎ | × | × | × |
-| AIチャット（エージェント） | ◎ | × | ○ | × |
+| 学習チャット（Tutor Agent） | ◎ | × | ○ | × |
 | 日本語対応 | ◎ | △ | △ | △ |
 
 ## 🏗️ アーキテクチャ
@@ -86,7 +87,7 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘     │
 │  Zustand（永続化ストア）+ Agent Activity Panel               │
 └─────────────────────┬───────────────────────────────────────┘
-                      │ REST API
+                      │ REST API + SSE（Server-Sent Events）
 ┌─────────────────────▼───────────────────────────────────────┐
 │  Backend（FastAPI + Cloud Run）                               │
 │  /papers  /graph  /chat  /learning-path  /adk  /agents      │
@@ -140,7 +141,7 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 | Graph Agent | 抽出結果をFirestoreのナレッジグラフに保存・検索 | `add_concept`, `add_relation`, `search_concepts`, `get_related_concepts` |
 | Tutor Agent | 概念の説明、クイズ生成、学習パス提案 | `explain_concept`, `generate_quiz`, `generate_learning_path`, `suggest_related_papers` |
 
-パイプライン実行中のエージェント活動はフロントエンドの **Agent Activity Panel** にリアルタイム表示されます。
+パイプライン実行中のエージェント活動は **SSE（Server-Sent Events）** でフロントエンドの **Agent Activity Panel** に1件ずつリアルタイムストリーミング表示されます。`POST /api/agents/start` でバックグラウンド実行を開始し、`GET /api/agents/stream/{session_id}` でアクティビティを受信します。
 
 ```
 [Activity Panel の表示例]
@@ -159,7 +160,7 @@ PaperForgeは以下の機能群により、論文理解のワークフローを�
 | フロントエンド | React + TypeScript + Vite | SPA UI |
 | 状態管理 | Zustand (persist) | グラフ・論文データのローカル永続化 |
 | 可視化 | react-force-graph-2d + Canvas API | ナレッジグラフ描画（階層/タイムラインレイアウト） |
-| バックエンド | FastAPI + Uvicorn | REST API |
+| バックエンド | FastAPI + Uvicorn | REST API + SSE ストリーミング |
 | データベース | Firestore | 概念・関係性・論文データの永続化（デバイス間同期） |
 | ベクトル検索 | Embeddings + コサイン類似度 | セマンティック検索・類似概念発見・関係性提案 |
 | エージェント | Google ADK (Runner + FunctionTool) | マルチエージェントオーケストレーション |
@@ -211,7 +212,8 @@ paperforge/
 │       │   └── SettingsPage.tsx     # 設定・データ管理
 │       ├── stores/
 │       │   ├── graphStore.ts        # 概念・関係の状態管理
-│       │   └── paperStore.ts        # 論文データの状態管理
+│       │   ├── paperStore.ts        # 論文データの状態管理
+│       │   └── learningPathStore.ts # 学習パスの状態管理（進捗永続化）
 │       ├── components/
 │       │   ├── Layout.tsx           # 共通レイアウト
 │       │   └── AgentActivity.tsx    # エージェント活動表示
@@ -295,9 +297,9 @@ gcloud run deploy paperforge \
 
 - [x] デプロイURL: https://paperforge-740219973201.asia-northeast1.run.app
 - [x] GitHubリポジトリ
-- [ ] Zenn記事（4000〜6000字）
-  - [ ] プロジェクト概要
-  - [ ] システムアーキテクチャ図
+- [x] Zenn記事（4000〜6000字）
+  - [x] プロジェクト概要
+  - [x] システムアーキテクチャ図
   - [ ] デモ動画（3分以内、YouTube）
 
 ## ⚠️ 注意事項

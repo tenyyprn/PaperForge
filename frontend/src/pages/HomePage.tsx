@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadPaper, runPipeline, type PaperResponse, type AgentActivity } from "../api/client";
+import { uploadPaper, startPipeline, streamActivities, type PaperResponse, type AgentActivity } from "../api/client";
 import { useGraphStore, CONCEPT_TYPE_COLORS, CONCEPT_TYPE_LABELS, type ConceptType } from "../stores/graphStore";
 import { usePaperStore, createPaperFromResponse } from "../stores/paperStore";
 import { AgentActivityPanel } from "../components/AgentActivity";
@@ -19,6 +19,13 @@ export function HomePage() {
   const { addConcepts, addRelations } = useGraphStore();
   const { addPaper } = usePaperStore();
   const navigate = useNavigate();
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -43,10 +50,11 @@ export function HomePage() {
       setStatus("success");
       setAdded(false);
 
-      // アップロード成功後、マルチエージェントパイプラインを実行
+      // アップロード成功後、マルチエージェントパイプラインをSSEストリーミングで実行
       setPipelineRunning(true);
       try {
-        const pipelineResponse = await runPipeline(
+        const { session_id } = await startPipeline(
+          "pipeline",
           JSON.stringify({
             summary: response.summary,
             concepts: response.concepts?.map(c => c.name) || [],
@@ -54,12 +62,22 @@ export function HomePage() {
           file.name,
           response.concepts || [],
         );
-        setActivities(pipelineResponse.activities);
-        setPipelineResult(pipelineResponse.result?.pipeline_result as string || "");
+
+        eventSourceRef.current?.close();
+        eventSourceRef.current = streamActivities(
+          session_id,
+          (activity) => setActivities((prev) => [...prev, activity]),
+          (result) => {
+            setPipelineResult((result?.pipeline_result as string) || "");
+            setPipelineRunning(false);
+          },
+          () => {
+            console.warn("Pipeline SSE connection error (non-critical)");
+            setPipelineRunning(false);
+          },
+        );
       } catch {
-        // パイプラインエラーはサイレントに処理（アップロード自体は成功している）
-        console.warn("Pipeline execution failed (non-critical)");
-      } finally {
+        console.warn("Pipeline start failed (non-critical)");
         setPipelineRunning(false);
       }
     } catch (err) {

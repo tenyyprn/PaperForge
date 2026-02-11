@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { type AgentActivity as AgentActivityType } from "../api/client";
 
 interface Props {
@@ -5,6 +6,15 @@ interface Props {
 }
 
 export function AgentActivityPanel({ activities }: Props) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [activities]);
+
   if (activities.length === 0) {
     return null;
   }
@@ -12,7 +22,7 @@ export function AgentActivityPanel({ activities }: Props) {
   return (
     <div className="agent-activity-panel">
       <h4>Agent Activity</h4>
-      <div className="activity-list">
+      <div className="activity-list" ref={listRef}>
         {activities.map((activity) => (
           <div
             key={activity.id}
