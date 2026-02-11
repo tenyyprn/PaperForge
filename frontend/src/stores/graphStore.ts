@@ -101,19 +101,24 @@ export const useGraphStore = create<GraphStore>()(
       lastSyncedAt: null,
       storageType: "local",
 
-      addConcepts: (newConcepts) =>
+      addConcepts: (newConcepts) => {
         set((state) => {
           const existingIds = new Set(state.concepts.map((c) => c.id));
           const uniqueConcepts = newConcepts.filter((c) => !existingIds.has(c.id));
           return { concepts: [...state.concepts, ...uniqueConcepts] };
-        }),
+        });
+        // Firestore へ自動同期（非同期・失敗してもブロックしない）
+        setTimeout(() => get().syncToServer(), 0);
+      },
 
-      addRelations: (newRelations) =>
+      addRelations: (newRelations) => {
         set((state) => {
           const existingIds = new Set(state.relations.map((r) => r.id));
           const uniqueRelations = newRelations.filter((r) => !existingIds.has(r.id));
           return { relations: [...state.relations, ...uniqueRelations] };
-        }),
+        });
+        setTimeout(() => get().syncToServer(), 0);
+      },
 
       clearGraph: () => set({ concepts: [], relations: [] }),
 

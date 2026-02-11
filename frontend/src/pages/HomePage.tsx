@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadPaper, type PaperResponse } from "../api/client";
+import { uploadPaper, runPipeline, type PaperResponse, type AgentActivity } from "../api/client";
 import { useGraphStore, CONCEPT_TYPE_COLORS, CONCEPT_TYPE_LABELS, type ConceptType } from "../stores/graphStore";
 import { usePaperStore, createPaperFromResponse } from "../stores/paperStore";
+import { AgentActivityPanel } from "../components/AgentActivity";
 
 type Status = "idle" | "uploading" | "success" | "error";
 
@@ -12,6 +13,9 @@ export function HomePage() {
   const [result, setResult] = useState<PaperResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [activities, setActivities] = useState<AgentActivity[]>([]);
+  const [pipelineResult, setPipelineResult] = useState<string>("");
   const { addConcepts, addRelations } = useGraphStore();
   const { addPaper } = usePaperStore();
   const navigate = useNavigate();
@@ -30,12 +34,34 @@ export function HomePage() {
 
     setStatus("uploading");
     setError(null);
+    setActivities([]);
+    setPipelineResult("");
 
     try {
       const response = await uploadPaper(file);
       setResult(response);
       setStatus("success");
       setAdded(false);
+
+      // アップロード成功後、マルチエージェントパイプラインを実行
+      setPipelineRunning(true);
+      try {
+        const pipelineResponse = await runPipeline(
+          JSON.stringify({
+            summary: response.summary,
+            concepts: response.concepts?.map(c => c.name) || [],
+          }),
+          file.name,
+          response.concepts || [],
+        );
+        setActivities(pipelineResponse.activities);
+        setPipelineResult(pipelineResponse.result?.pipeline_result as string || "");
+      } catch {
+        // パイプラインエラーはサイレントに処理（アップロード自体は成功している）
+        console.warn("Pipeline execution failed (non-critical)");
+      } finally {
+        setPipelineRunning(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "アップロードに失敗しました");
       setStatus("error");
@@ -82,6 +108,21 @@ export function HomePage() {
         </div>
 
         {error && <div className="error-message">{error}</div>}
+
+        {(pipelineRunning || activities.length > 0) && (
+          <div className="pipeline-section">
+            <h3>
+              {pipelineRunning ? "エージェントパイプライン実行中..." : "エージェントパイプライン完了"}
+            </h3>
+            <AgentActivityPanel activities={activities} />
+            {pipelineResult && (
+              <div className="pipeline-result">
+                <h4>パイプライン結果</h4>
+                <p>{pipelineResult}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className="result-section">

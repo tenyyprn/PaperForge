@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useGraphStore } from "../stores/graphStore";
+import { useLearningPathStore } from "../stores/learningPathStore";
 
 export function SettingsPage() {
   const { concepts, relations, clearGraph } = useGraphStore();
+  const { paths, clearPaths } = useLearningPathStore();
   const [apiUrl, setApiUrl] = useState(
     localStorage.getItem("apiUrl") || "http://localhost:8001"
   );
@@ -21,7 +23,9 @@ export function SettingsPage() {
       )
     ) {
       clearGraph();
+      clearPaths();
       localStorage.removeItem("graph-storage");
+      localStorage.removeItem("paperforge-learning-paths");
     }
   };
 
@@ -29,6 +33,7 @@ export function SettingsPage() {
     const data = {
       concepts,
       relations,
+      learningPaths: paths,
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -55,6 +60,12 @@ export function SettingsPage() {
           addConcepts(data.concepts);
           if (data.relations) {
             addRelations(data.relations);
+          }
+          if (data.learningPaths && Array.isArray(data.learningPaths)) {
+            const { savePath } = useLearningPathStore.getState();
+            for (const lp of data.learningPaths) {
+              savePath(lp.steps, lp.summary);
+            }
           }
           alert(`${data.concepts.length}件の概念をインポートしました`);
         }
@@ -101,6 +112,10 @@ export function SettingsPage() {
           <div className="stat-item">
             <span className="stat-value">{relations.length}</span>
             <span className="stat-label">関係性</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-value">{paths.length}</span>
+            <span className="stat-label">学習パス</span>
           </div>
         </div>
 

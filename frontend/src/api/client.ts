@@ -197,6 +197,20 @@ export async function getAgentList(): Promise<{ agents: Record<string, { name: s
   return response.data;
 }
 
+export async function runPipeline(
+  text: string,
+  filename: string,
+  concepts: Concept[] = []
+): Promise<AgentResponse> {
+  const response = await apiClient.post<AgentResponse>("/api/agents/run", {
+    task: "pipeline",
+    input: text,
+    filename,
+    concepts,
+  });
+  return response.data;
+}
+
 // Graph Sync API
 export interface GraphSyncRequest {
   concepts: Concept[];
@@ -296,6 +310,31 @@ export async function suggestRelations(
   const response = await apiClient.post<SuggestRelationsResponse>("/api/graph/suggest-relations", {
     threshold,
   });
+  return response.data;
+}
+
+// Paper Sync API (Firestore 連携)
+export interface StoredPaper {
+  id: string;
+  filename: string;
+  uploadedAt: string;
+  summary: Record<string, unknown>;
+  conceptIds: string[];
+  relationIds: string[];
+}
+
+export async function storePaper(paper: StoredPaper): Promise<{ success: boolean; paper_id: string; storage: string }> {
+  const response = await apiClient.post("/api/papers/store", paper);
+  return response.data;
+}
+
+export async function listStoredPapers(): Promise<{ papers: StoredPaper[]; storage: string }> {
+  const response = await apiClient.get("/api/papers/stored/list");
+  return response.data;
+}
+
+export async function deleteStoredPaper(paperId: string): Promise<{ success: boolean }> {
+  const response = await apiClient.delete(`/api/papers/stored/${paperId}`);
   return response.data;
 }
 

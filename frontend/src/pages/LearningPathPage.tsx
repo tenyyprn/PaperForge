@@ -1,18 +1,24 @@
 import { useState } from "react";
 import { useGraphStore } from "../stores/graphStore";
+import { useLearningPathStore } from "../stores/learningPathStore";
 import {
   generateLearningPath,
   type LearningStep,
-  type LearningPathResponse,
 } from "../api/client";
 
 export function LearningPathPage() {
   const { concepts, relations } = useGraphStore();
+  const {
+    paths,
+    activePathId,
+    savePath,
+    deletePath,
+    setActivePath,
+    toggleStepComplete,
+  } = useLearningPathStore();
   const [isLoading, setIsLoading] = useState(false);
-  const [learningPath, setLearningPath] = useState<LearningPathResponse | null>(
-    null
-  );
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+
+  const activePath = paths.find((p) => p.id === activePathId);
 
   const handleGenerate = async () => {
     if (concepts.length === 0) return;
@@ -20,8 +26,7 @@ export function LearningPathPage() {
     setIsLoading(true);
     try {
       const result = await generateLearningPath(concepts, relations);
-      setLearningPath(result);
-      setCompletedSteps(new Set());
+      savePath(result.steps, result.summary);
     } catch (error) {
       console.error("Failed to generate learning path:", error);
     } finally {
@@ -29,29 +34,17 @@ export function LearningPathPage() {
     }
   };
 
-  const toggleStepComplete = (order: number) => {
-    setCompletedSteps((prev) => {
-      const next = new Set(prev);
-      if (next.has(order)) {
-        next.delete(order);
-      } else {
-        next.add(order);
-      }
-      return next;
-    });
-  };
-
-  const progress = learningPath
-    ? Math.round((completedSteps.size / learningPath.steps.length) * 100)
+  const progress = activePath
+    ? Math.round(
+        (activePath.completedSteps.length / activePath.steps.length) * 100
+      )
     : 0;
 
   return (
     <div className="learning-path-page page-container">
       <div className="learning-path-header">
         <h2>学習パス</h2>
-        <p className="subtitle">
-          最適な順序で概念を学習しましょう
-        </p>
+        <p className="subtitle">最適な順序で概念を学習しましょう</p>
       </div>
 
       {concepts.length === 0 ? (
@@ -76,7 +69,48 @@ export function LearningPathPage() {
             </button>
           </div>
 
-          {learningPath && (
+          {paths.length > 1 && (
+            <div className="saved-paths-section">
+              <h4>保存済み学習パス ({paths.length})</h4>
+              <div className="saved-paths-list">
+                {paths.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`saved-path-item ${
+                      p.id === activePathId ? "active" : ""
+                    }`}
+                    onClick={() => setActivePath(p.id)}
+                  >
+                    <div className="saved-path-info">
+                      <span className="saved-path-date">
+                        {new Date(p.createdAt).toLocaleDateString("ja-JP", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="saved-path-steps">
+                        {p.completedSteps.length}/{p.steps.length} 完了
+                      </span>
+                    </div>
+                    <button
+                      className="delete-path-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deletePath(p.id);
+                      }}
+                      title="削除"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activePath && (
             <>
               <div className="progress-section">
                 <div className="progress-bar">
@@ -86,29 +120,35 @@ export function LearningPathPage() {
                   />
                 </div>
                 <span className="progress-text">
-                  {completedSteps.size} / {learningPath.steps.length} 完了
-                  ({progress}%)
+                  {activePath.completedSteps.length} /{" "}
+                  {activePath.steps.length} 完了 ({progress}%)
                 </span>
               </div>
 
               <div className="summary-section">
-                <p>{learningPath.summary}</p>
+                <p>{activePath.summary}</p>
               </div>
 
               <div className="steps-list">
-                {learningPath.steps.map((step: LearningStep) => (
+                {activePath.steps.map((step: LearningStep) => (
                   <div
                     key={step.order}
                     className={`step-card ${
-                      completedSteps.has(step.order) ? "completed" : ""
+                      activePath.completedSteps.includes(step.order)
+                        ? "completed"
+                        : ""
                     }`}
-                    onClick={() => toggleStepComplete(step.order)}
+                    onClick={() =>
+                      toggleStepComplete(activePath.id, step.order)
+                    }
                   >
                     <div className="step-header">
                       <span className="step-number">{step.order}</span>
                       <h3 className="step-name">{step.concept_name}</h3>
                       <span className="step-checkbox">
-                        {completedSteps.has(step.order) ? "✓" : "○"}
+                        {activePath.completedSteps.includes(step.order)
+                          ? "✓"
+                          : "○"}
                       </span>
                     </div>
                     <p className="step-reason">{step.reason}</p>

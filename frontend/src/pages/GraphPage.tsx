@@ -10,6 +10,7 @@ import {
   type ConceptType,
 } from "../stores/graphStore";
 import { usePaperStore } from "../stores/paperStore";
+import { semanticSearch, getSimilarConcepts, type SimilarConceptResult } from "../api/client";
 
 // 階層レベルの定義（Y軸：上から下へ）
 const HIERARCHY_LEVELS: Record<ConceptType, number> = {
@@ -73,6 +74,12 @@ export function GraphPage() {
   const [explorationMode, setExplorationMode] = useState(false);
   const [colorMode, setColorMode] = useState<"type" | "paper">("type");
   const [layoutMode, setLayoutMode] = useState<"hierarchy" | "timeline">("hierarchy");
+  const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
+  const [semanticResults, setSemanticResults] = useState<SimilarConceptResult[]>([]);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [similarConcepts, setSimilarConcepts] = useState<SimilarConceptResult[]>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const semanticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 論文ごとのカラーパレット
   const PAPER_COLORS = [
@@ -206,9 +213,8 @@ export function GraphPage() {
     }
   };
 
-  // 検索処理
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
+  // キーワード検索処理
+  const handleKeywordSearch = (query: string) => {
     if (query.trim() === "") {
       setHighlightedNodes(new Set());
       return;
@@ -228,6 +234,56 @@ export function GraphPage() {
     );
     setHighlightedNodes(matchingIds);
   };
+
+  // セマンティック検索処理（debounce付き）
+  const handleSemanticSearch = (query: string) => {
+    if (semanticTimerRef.current) clearTimeout(semanticTimerRef.current);
+    if (query.trim() === "") {
+      setHighlightedNodes(new Set());
+      setSemanticResults([]);
+      setSemanticLoading(false);
+      return;
+    }
+    setSemanticLoading(true);
+    semanticTimerRef.current = setTimeout(async () => {
+      try {
+        const results = await semanticSearch(query, 10, 0.4);
+        setSemanticResults(results);
+        const matchingIds = new Set(results.map((r) => r.concept.id));
+        setHighlightedNodes(matchingIds);
+      } catch {
+        // API未接続時はキーワード検索にフォールバック
+        handleKeywordSearch(query);
+        setSemanticResults([]);
+      } finally {
+        setSemanticLoading(false);
+      }
+    }, 400);
+  };
+
+  // 統合検索ハンドラー
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (searchMode === "semantic") {
+      handleSemanticSearch(query);
+    } else {
+      handleKeywordSearch(query);
+      setSemanticResults([]);
+    }
+  };
+
+  // ノード選択時に類似概念を取得
+  useEffect(() => {
+    if (!selectedNode) {
+      setSimilarConcepts([]);
+      return;
+    }
+    setSimilarLoading(true);
+    getSimilarConcepts(selectedNode.id, 5, 0.4)
+      .then((results) => setSimilarConcepts(results))
+      .catch(() => setSimilarConcepts([]))
+      .finally(() => setSimilarLoading(false));
+  }, [selectedNode?.id]);
 
   // ノードクリック - 探索モード
   const handleNodeClick = useCallback(
@@ -726,17 +782,54 @@ export function GraphPage() {
                 </button>
               )}
               <div className="control-group search-group">
+                <button
+                  className={`search-mode-toggle ${searchMode === "semantic" ? "active" : ""}`}
+                  onClick={() => {
+                    const newMode = searchMode === "keyword" ? "semantic" : "keyword";
+                    setSearchMode(newMode);
+                    if (searchQuery) {
+                      if (newMode === "semantic") handleSemanticSearch(searchQuery);
+                      else { handleKeywordSearch(searchQuery); setSemanticResults([]); }
+                    }
+                  }}
+                  title={searchMode === "keyword" ? "セマンティック検索に切替" : "キーワード検索に切替"}
+                >
+                  {searchMode === "keyword" ? "Aa" : "AI"}
+                </button>
                 <input
                   type="text"
-                  placeholder="概念を検索..."
+                  placeholder={searchMode === "keyword" ? "概念を検索..." : "意味で検索（例: 深層学習の手法）..."}
                   value={searchQuery}
                   onChange={(e) => handleSearch(e.target.value)}
-                  className="floating-search"
+                  className={`floating-search ${searchMode === "semantic" ? "semantic-active" : ""}`}
                 />
-                {searchQuery && (
+                {semanticLoading && <span className="search-loading">...</span>}
+                {searchQuery && !semanticLoading && (
                   <button className="search-clear-btn" onClick={() => handleSearch("")}>×</button>
                 )}
                 {highlightedNodes.size > 0 && <span className="search-count">{highlightedNodes.size}件</span>}
+                {/* セマンティック検索結果ドロップダウン */}
+                {semanticResults.length > 0 && searchQuery && (
+                  <div className="semantic-results-dropdown">
+                    {semanticResults.map((r) => (
+                      <div
+                        key={r.concept.id}
+                        className="semantic-result-item"
+                        onClick={() => {
+                          const node = graphData.nodes.find((n) => n.id === r.concept.id);
+                          if (node) handleNodeClick(node);
+                          setSemanticResults([]);
+                        }}
+                      >
+                        <span className="result-name">{r.concept.name_ja || r.concept.name}</span>
+                        <span className="similarity-score">{Math.round(r.similarity * 100)}%</span>
+                        <div className="similarity-bar">
+                          <div className="similarity-fill" style={{ width: `${r.similarity * 100}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="control-group zoom-group">
                 <button onClick={handleZoomIn} title="ズームイン">+</button>
@@ -887,6 +980,31 @@ export function GraphPage() {
                 </ul>
               </div>
             )}
+
+            {/* 意味的に類似する概念 */}
+            <div className="similar-concepts-section">
+              <h5>意味的に類似</h5>
+              {similarLoading ? (
+                <p className="similar-loading">検索中...</p>
+              ) : similarConcepts.length > 0 ? (
+                <ul>
+                  {similarConcepts.map((sc) => (
+                    <li
+                      key={sc.concept.id}
+                      onClick={() => {
+                        const node = graphData.nodes.find((n) => n.id === sc.concept.id);
+                        if (node) handleNodeClick(node);
+                      }}
+                    >
+                      <span className="relation-target">{sc.concept.name_ja || sc.concept.name}</span>
+                      <span className="similarity-score">{Math.round(sc.similarity * 100)}%</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="similar-empty">類似概念なし</p>
+              )}
+            </div>
 
             <div className="detail-actions">
               <button className="ask-ai-btn" onClick={() => askAboutConcept(selectedNode)}>

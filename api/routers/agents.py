@@ -79,8 +79,9 @@ class AgentActivity(BaseModel):
 
 
 class AgentRequest(BaseModel):
-    task: str  # "extract", "learn", "quiz", "chat"
+    task: str  # "extract", "learn", "quiz", "chat", "pipeline"
     input: str
+    filename: str = ""
     concepts: list[dict] = []
     context: dict = {}
 
@@ -300,6 +301,188 @@ JSON形式で出力:
     return quiz
 
 
+async def run_pipeline_task(text: str, filename: str, session_id: str, user_id: str = "anonymous") -> dict:
+    """マルチエージェントパイプラインを実行
+
+    Extraction Agent → Graph Agent → Tutor Agent の連携パイプライン
+    ADK Runner を使用してオーケストレーターが各エージェントに作業を委譲する
+    """
+    activities = _sessions.get(session_id, [])
+
+    # グラフエージェントにユーザーIDを設定
+    from agents.graph.tools import set_current_user
+    set_current_user(user_id)
+
+    # オーケストレーター開始
+    activities.append(create_activity(
+        "orchestrator", "pipeline_start", "started",
+        "マルチエージェントパイプラインを開始します..."
+    ))
+    _sessions[session_id] = activities
+
+    try:
+        from google.adk import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai import types
+        from agents.orchestrator import root_agent
+
+        session_service = InMemorySessionService()
+        runner = Runner(
+            agent=root_agent,
+            app_name="paperforge",
+            session_service=session_service,
+        )
+
+        # セッション作成
+        adk_session_id = f"pipeline_{uuid.uuid4().hex[:8]}"
+        await session_service.create_session(
+            app_name="paperforge",
+            user_id=user_id,
+            session_id=adk_session_id,
+        )
+
+        # パイプラインメッセージ
+        message = f"""以下の論文テキストを処理してください。パイプラインの各ステップを実行してください。
+
+論文ファイル名: {filename}
+
+論文テキスト:
+{text[:8000]}"""
+
+        content = types.Content(
+            role="user",
+            parts=[types.Part(text=message)],
+        )
+
+        # ADK Runner でオーケストレーターを実行
+        activities.append(create_activity(
+            "orchestrator", "delegate", "delegating",
+            "Extraction Agent に論文の解析を委譲します"
+        ))
+        _sessions[session_id] = activities
+
+        result_text = ""
+        last_agent = "orchestrator"
+
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=adk_session_id,
+            new_message=content,
+        ):
+            if not hasattr(event, "content") or not event.content:
+                continue
+
+            # エージェント名を取得
+            agent_name = getattr(event, "author", last_agent) or last_agent
+
+            # エージェント名からIDへのマッピング
+            agent_id_map = {
+                "paperforge_agent": "orchestrator",
+                "extraction_agent": "extraction",
+                "graph_agent": "graph",
+                "tutor_agent": "tutor",
+            }
+            agent_id = agent_id_map.get(agent_name, agent_name)
+
+            for part in event.content.parts:
+                # ツール呼び出し
+                if hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    tool_name = fc.name
+
+                    # ツール名に基づいてアクティビティを記録
+                    if tool_name == "extract_concepts":
+                        activities.append(create_activity(
+                            "extraction", "extract", "thinking",
+                            "論文テキストから概念と関係性を抽出中..."
+                        ))
+                    elif tool_name in ("add_concept", "add_relation"):
+                        args = dict(fc.args) if fc.args else {}
+                        name = args.get("name", args.get("source_concept", ""))
+                        activities.append(create_activity(
+                            "graph", "update", "thinking",
+                            f"ナレッジグラフに保存中: {name}"
+                        ))
+                    elif tool_name == "explain_concept":
+                        args = dict(fc.args) if fc.args else {}
+                        activities.append(create_activity(
+                            "tutor", "explain", "thinking",
+                            f"概念「{args.get('concept_name', '')}」を解説中..."
+                        ))
+                    else:
+                        activities.append(create_activity(
+                            agent_id, tool_name, "thinking",
+                            f"ツール呼び出し: {tool_name}"
+                        ))
+                    _sessions[session_id] = activities
+
+                # ツール結果
+                if hasattr(part, "function_response") and part.function_response:
+                    fr = part.function_response
+                    tool_name = fr.name
+
+                    if tool_name == "extract_concepts":
+                        activities.append(create_activity(
+                            "extraction", "extract", "completed",
+                            "概念と関係性の抽出が完了しました"
+                        ))
+                        activities.append(create_activity(
+                            "orchestrator", "delegate", "delegating",
+                            "Graph Agent にナレッジグラフへの保存を委譲します"
+                        ))
+                    elif tool_name == "add_concept":
+                        pass  # 個別の保存は静かに処理
+                    elif tool_name == "add_relation":
+                        pass
+                    elif tool_name == "explain_concept":
+                        activities.append(create_activity(
+                            "tutor", "explain", "completed",
+                            "概念の解説が完了しました"
+                        ))
+                    _sessions[session_id] = activities
+
+                # テキスト応答
+                if hasattr(part, "text") and part.text:
+                    result_text = part.text
+                    last_agent = agent_name
+
+        # グラフ保存完了のアクティビティ
+        activities.append(create_activity(
+            "graph", "update", "completed",
+            "ナレッジグラフへの保存が完了しました"
+        ))
+
+        # パイプライン完了
+        activities.append(create_activity(
+            "orchestrator", "pipeline_complete", "completed",
+            "マルチエージェントパイプラインが完了しました"
+        ))
+        _sessions[session_id] = activities
+
+        return {
+            "pipeline_result": result_text,
+            "status": "completed",
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        activities.append(create_activity(
+            "orchestrator", "error", "completed",
+            f"パイプラインエラー: {error_msg}"
+        ))
+        _sessions[session_id] = activities
+
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            return {
+                "pipeline_result": "APIのレート制限に達しました。少し時間を置いてから再度お試しください。",
+                "status": "rate_limited",
+            }
+        return {
+            "pipeline_result": f"エラーが発生しました: {error_msg}",
+            "status": "error",
+        }
+
+
 @router.post("/run", response_model=AgentResponse)
 async def run_agent(request: AgentRequest):
     """エージェントタスクを実行"""
@@ -310,6 +493,12 @@ async def run_agent(request: AgentRequest):
         result = await run_extraction_task(request.input, session_id)
     elif request.task == "quiz":
         result = await run_quiz_task(request.concepts, session_id)
+    elif request.task == "pipeline":
+        result = await run_pipeline_task(
+            request.input,
+            request.filename or "unknown.pdf",
+            session_id,
+        )
     else:
         result = {"message": "Unknown task"}
 

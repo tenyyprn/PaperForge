@@ -122,6 +122,36 @@ class FirestoreClient:
             count += 1
         return count
 
+    # ========== 論文（Papers）操作 ==========
+
+    async def add_paper(self, user_id: str, paper: dict[str, Any]) -> str:
+        """論文を追加"""
+        doc_ref = self.collection("users").document(user_id).collection("papers").document(paper["id"])
+        doc_ref.set(paper)
+        return paper["id"]
+
+    async def get_all_papers(self, user_id: str) -> list[dict[str, Any]]:
+        """ユーザーの全論文を取得"""
+        papers_ref = self.collection("users").document(user_id).collection("papers")
+        docs = papers_ref.stream()
+        return [doc.to_dict() for doc in docs]
+
+    async def delete_paper(self, user_id: str, paper_id: str) -> bool:
+        """論文を削除"""
+        doc_ref = self.collection("users").document(user_id).collection("papers").document(paper_id)
+        doc_ref.delete()
+        return True
+
+    async def clear_papers(self, user_id: str) -> int:
+        """ユーザーの全論文を削除"""
+        papers_ref = self.collection("users").document(user_id).collection("papers")
+        docs = papers_ref.stream()
+        count = 0
+        for doc in docs:
+            doc.reference.delete()
+            count += 1
+        return count
+
     # ========== グラフ全体操作 ==========
 
     async def get_graph(self, user_id: str) -> dict[str, Any]:

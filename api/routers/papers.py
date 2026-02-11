@@ -5,11 +5,34 @@ import uuid
 import json
 import io
 import re
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Header
 from pydantic import BaseModel
 from pypdf import PdfReader
 
 router = APIRouter()
+
+# Firestore クライアント（遅延初期化）
+_db_client = None
+
+
+def get_db():
+    """Firestoreクライアントを取得"""
+    global _db_client
+    if _db_client is None:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        if project_id:
+            from api.db.firestore import get_firestore_client
+            _db_client = get_firestore_client()
+    return _db_client
+
+
+def get_user_id(x_user_id: str | None = None) -> str:
+    """ユーザーIDを取得"""
+    return x_user_id or "anonymous"
+
+
+# インメモリストレージ（Firestore未設定時のフォールバック）
+_memory_papers: dict[str, list[dict]] = {}
 
 # Gemini クライアント（遅延初期化）
 _client = None
@@ -308,6 +331,91 @@ async def upload_paper(file: UploadFile = File(...)):
         summary=summary,
     )
 
+
+# ========== 論文 Firestore 同期 API ==========
+
+class StoredPaper(BaseModel):
+    id: str
+    filename: str
+    uploadedAt: str
+    summary: dict = {}
+    conceptIds: list[str] = []
+    relationIds: list[str] = []
+
+
+class StorePaperResponse(BaseModel):
+    success: bool
+    paper_id: str
+    storage: str
+
+
+class PaperListResponse(BaseModel):
+    papers: list[dict]
+    storage: str
+
+
+@router.post("/store", response_model=StorePaperResponse)
+async def store_paper(
+    paper: StoredPaper,
+    x_user_id: str | None = Header(default=None),
+):
+    """論文をFirestore（またはメモリ）に保存する"""
+    user_id = get_user_id(x_user_id)
+    db = get_db()
+
+    paper_data = paper.model_dump()
+
+    if db:
+        await db.add_paper(user_id, paper_data)
+        return StorePaperResponse(success=True, paper_id=paper.id, storage="firestore")
+    else:
+        if user_id not in _memory_papers:
+            _memory_papers[user_id] = []
+        # 既存を上書き
+        _memory_papers[user_id] = [
+            p for p in _memory_papers[user_id] if p["id"] != paper.id
+        ]
+        _memory_papers[user_id].append(paper_data)
+        return StorePaperResponse(success=True, paper_id=paper.id, storage="memory")
+
+
+@router.get("/stored/list", response_model=PaperListResponse)
+async def list_stored_papers(
+    x_user_id: str | None = Header(default=None),
+):
+    """保存された論文一覧を取得する"""
+    user_id = get_user_id(x_user_id)
+    db = get_db()
+
+    if db:
+        papers = await db.get_all_papers(user_id)
+        return PaperListResponse(papers=papers, storage="firestore")
+    else:
+        papers = _memory_papers.get(user_id, [])
+        return PaperListResponse(papers=papers, storage="memory")
+
+
+@router.delete("/stored/{paper_id}")
+async def delete_stored_paper(
+    paper_id: str,
+    x_user_id: str | None = Header(default=None),
+):
+    """保存された論文を削除する"""
+    user_id = get_user_id(x_user_id)
+    db = get_db()
+
+    if db:
+        await db.delete_paper(user_id, paper_id)
+        return {"success": True, "storage": "firestore"}
+    else:
+        if user_id in _memory_papers:
+            _memory_papers[user_id] = [
+                p for p in _memory_papers[user_id] if p["id"] != paper_id
+            ]
+        return {"success": True, "storage": "memory"}
+
+
+# ========== 個別論文取得（動的ルートは末尾に配置）==========
 
 @router.get("/{paper_id}", response_model=PaperResponse)
 async def get_paper(paper_id: str):

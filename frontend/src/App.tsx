@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
@@ -8,11 +9,28 @@ import { ChatPage } from "./pages/ChatPage";
 import { LearningPathPage } from "./pages/LearningPathPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { QuizPage } from "./pages/QuizPage";
+import { useGraphStore } from "./stores/graphStore";
+import { usePaperStore } from "./stores/paperStore";
 import "./App.css";
 
 const queryClient = new QueryClient();
 
 function App() {
+  const loadFromServer = useGraphStore((s) => s.loadFromServer);
+  const concepts = useGraphStore((s) => s.concepts);
+  const loadPapersFromServer = usePaperStore((s) => s.loadPapersFromServer);
+  const papers = usePaperStore((s) => s.papers);
+
+  // 起動時にFirestoreからデータを読み込み（ローカルにデータがない場合）
+  useEffect(() => {
+    if (concepts.length === 0) {
+      loadFromServer().catch(() => {});
+    }
+    if (papers.length === 0) {
+      loadPapersFromServer().catch(() => {});
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
