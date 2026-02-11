@@ -10,8 +10,10 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.routers import papers, chat, graph, learning_path, agents, adk_chat
 
@@ -55,3 +57,17 @@ app.include_router(adk_chat.router, prefix="/api/adk", tags=["adk"])
 async def health_check():
     """ヘルスチェックエンドポイント"""
     return {"status": "healthy"}
+
+
+# 静的ファイル配信（Cloud Run デプロイ時: フロントエンドを同一オリジンで配信）
+static_dir = Path(__file__).parent.parent / "static"
+if static_dir.exists():
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        """SPAのフォールバック: APIパス以外は index.html を返す"""
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(static_dir / "index.html")
