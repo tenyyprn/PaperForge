@@ -27,7 +27,8 @@ def get_genai_client():
             # Vertex AI を使用
             project = os.getenv("GOOGLE_CLOUD_PROJECT")
             if project:
-                _client = genai.Client(vertexai=True, project=project, location="us-central1")
+                location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+                _client = genai.Client(vertexai=True, project=project, location=location)
     return _client
 
 

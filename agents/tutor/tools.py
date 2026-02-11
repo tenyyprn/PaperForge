@@ -14,7 +14,8 @@ def _get_genai_client():
         return genai.Client(api_key=api_key)
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     if project:
-        return genai.Client(vertexai=True, project=project, location="us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        return genai.Client(vertexai=True, project=project, location=location)
     return None
 
 
@@ -90,20 +91,26 @@ JSON形式で出力:
 
 
 def generate_quiz(
-    concepts: list[dict[str, str]],
+    concepts: str,
     num_questions: int = 3,
     difficulty: str = "intermediate",
 ) -> dict[str, Any]:
     """理解度確認用のクイズを生成する
 
     Args:
-        concepts: クイズ対象の概念リスト（各要素は {"name": "概念名", "definition": "定義"}）
+        concepts: クイズ対象の概念リストのJSON文字列。例: [{"name": "概念名", "definition": "定義"}]
         num_questions: 問題数
         difficulty: 難易度（easy, intermediate, hard）
 
     Returns:
         クイズ問題のリスト
     """
+    # ADK経由ではJSON文字列、直接呼び出しではlistが渡される
+    if isinstance(concepts, str):
+        try:
+            concepts = json.loads(concepts)
+        except (json.JSONDecodeError, TypeError):
+            concepts = []
     if not concepts:
         return {
             "questions": [],
@@ -180,19 +187,23 @@ JSON形式で出力:
 
 def generate_learning_path(
     goal: str,
-    available_concepts: list[dict[str, str]],
-    current_knowledge: list[str] | None = None,
+    available_concepts: str,
 ) -> dict[str, Any]:
     """学習目標に基づいて学習パスを生成する
 
     Args:
         goal: 学習目標
-        available_concepts: 利用可能な概念リスト
-        current_knowledge: ユーザーが既に理解している概念のリスト
+        available_concepts: 利用可能な概念リストのJSON文字列。例: [{"name": "概念名", "definition": "定義"}]
 
     Returns:
         学習パス（順序付けられた概念のリスト）
     """
+    # ADK経由ではJSON文字列、直接呼び出しではlistが渡される
+    if isinstance(available_concepts, str):
+        try:
+            available_concepts = json.loads(available_concepts)
+        except (json.JSONDecodeError, TypeError):
+            available_concepts = []
     client = _get_genai_client()
 
     if not available_concepts:
@@ -215,15 +226,10 @@ def generate_learning_path(
         f"- {c['name']}: {c.get('definition', '')}" for c in available_concepts[:20]
     )
 
-    known_text = ""
-    if current_knowledge:
-        known_text = f"\n\n既に理解している概念:\n" + "\n".join(f"- {k}" for k in current_knowledge)
-
     prompt = f"""学習目標: {goal}
 
 利用可能な概念:
 {concepts_text}
-{known_text}
 
 上記の概念を使って、学習目標を達成するための最適な学習パスを生成してください。
 概念間の依存関係を考慮し、基礎から応用への順序で並べてください。

@@ -26,8 +26,9 @@ class VectorSearchClient:
             else:
                 project = os.getenv("GOOGLE_CLOUD_PROJECT")
                 if project:
+                    location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
                     self._client = genai.Client(
-                        vertexai=True, project=project, location="us-central1"
+                        vertexai=True, project=project, location=location
                     )
         return self._client
 

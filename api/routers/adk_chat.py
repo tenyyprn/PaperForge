@@ -119,13 +119,22 @@ async def adk_chat(
     runner = _get_runner()
 
     # セッションを取得または作成
-    session = session_service.get_session(
-        app_name="paperforge",
-        user_id=user_id,
-        session_id=session_id,
-    )
+    session = None
+    try:
+        session = await session_service.get_session(
+            app_name="paperforge",
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except Exception:
+        # セッションが見つからない場合（デプロイ後のインメモリ消失等）
+        session = None
+
     if session is None:
-        session = session_service.create_session(
+        # 既存セッションIDが無効な場合は新規IDで作成
+        if request.session_id:
+            session_id = f"session_{uuid.uuid4().hex[:8]}"
+        session = await session_service.create_session(
             app_name="paperforge",
             user_id=user_id,
             session_id=session_id,
@@ -197,13 +206,20 @@ async def adk_chat(
                         ))
 
     except Exception as e:
+        error_str = str(e)
         events.append(AgentEvent(
             event_type="error",
             agent_name="Tutor Agent",
-            content=str(e),
+            content=error_str,
             timestamp=datetime.now().isoformat(),
         ))
-        response_text = f"エラーが発生しました: {str(e)}"
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            response_text = (
+                "APIのレート制限に達しました。少し時間を置いてから再度お試しください。\n\n"
+                "（Gemini API の無料枠には1分あたりのリクエスト数に制限があります）"
+            )
+        else:
+            response_text = f"エラーが発生しました: {error_str}"
 
     events.append(AgentEvent(
         event_type="completed",
@@ -234,13 +250,20 @@ async def adk_chat_stream(
     session_service = _get_session_service()
     runner = _get_runner()
 
-    session = session_service.get_session(
-        app_name="paperforge",
-        user_id=user_id,
-        session_id=session_id,
-    )
+    session = None
+    try:
+        session = await session_service.get_session(
+            app_name="paperforge",
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except Exception:
+        session = None
+
     if session is None:
-        session = session_service.create_session(
+        if request.session_id:
+            session_id = f"session_{uuid.uuid4().hex[:8]}"
+        session = await session_service.create_session(
             app_name="paperforge",
             user_id=user_id,
             session_id=session_id,

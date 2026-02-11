@@ -1,14 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { sendChatMessage, type ChatMessage, type ChatActivityItem } from "../api/client";
+import { sendADKChatMessage, type ADKAgentEvent } from "../api/client";
 import { useGraphStore } from "../stores/graphStore";
+
+interface DisplayMessage {
+  role: "user" | "assistant";
+  content: string;
+  toolCalls?: string[];
+}
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [activities, setActivities] = useState<ChatActivityItem[]>([]);
+  const [activities, setActivities] = useState<ADKAgentEvent[]>([]);
+  const [sessionId, setSessionId] = useState<string | undefined>();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasAutoSent = useRef(false);
   const { concepts } = useGraphStore();
@@ -17,39 +24,57 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // メッセージ送信の共通ロジック
+  // ADK Runner 経由でメッセージ送信
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
-    const userMessage: ChatMessage = { role: "user", content: text };
-    setMessages((prev) => {
-      const newMessages = [...prev, userMessage];
-      // 非同期で API 呼び出し
-      const chatConcepts = concepts.map((c) => ({
+    const userMessage: DisplayMessage = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+    setActivities([]);
+
+    try {
+      const adkConcepts = concepts.map((c) => ({
         name: c.name,
         name_ja: c.name_ja || "",
         definition: c.definition,
         definition_ja: c.definition_ja || "",
         concept_type: c.concept_type || "concept",
       }));
-      setIsLoading(true);
-      setActivities([]);
-      sendChatMessage(newMessages, chatConcepts)
-        .then((response) => {
-          setMessages((prev) => [...prev, response.message]);
-          setActivities(response.activities || []);
-        })
-        .catch(() => {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: "エラーが発生しました。もう一度お試しください。" },
-          ]);
-        })
-        .finally(() => setIsLoading(false));
-      return newMessages;
-    });
-    setInput("");
-  }, [isLoading, concepts]);
+
+      const response = await sendADKChatMessage(text, adkConcepts, sessionId);
+      setSessionId(response.session_id);
+
+      // ツール呼び出しを抽出
+      const toolCalls = response.events
+        .filter((e) => e.event_type === "tool_call")
+        .map((e) => e.metadata?.tool_name as string)
+        .filter(Boolean);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: response.response || "応答を生成できませんでした。",
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        },
+      ]);
+      setActivities(response.events);
+    } catch (err) {
+      // セッションエラーの場合はセッションをリセット
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes("Session not found") || errMsg.includes("session")) {
+        setSessionId(undefined);
+      }
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "エラーが発生しました。もう一度お試しください。" },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, concepts, sessionId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,23 +102,51 @@ export function ChatPage() {
     setInput(question);
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "started":
+  // アシスタントメッセージからクイックリプライ選択肢を検出
+  const detectQuickReplies = (content: string, isLast: boolean): { label: string; value: string }[] => {
+    if (!isLast || isLoading) return [];
+
+    // beginner / intermediate / advanced パターン
+    if (content.includes("beginner") && content.includes("intermediate") && content.includes("advanced")) {
+      return [
+        { label: "🔰 初心者向け", value: "beginner（初心者向け）でお願いします" },
+        { label: "📘 中級者向け", value: "intermediate（中級者向け）でお願いします" },
+        { label: "🎓 上級者向け", value: "advanced（上級者向け）でお願いします" },
+      ];
+    }
+
+    // easy / intermediate / hard パターン（クイズ難易度）
+    if (content.includes("easy") && content.includes("hard")) {
+      return [
+        { label: "😊 かんたん", value: "easy（かんたん）でお願いします" },
+        { label: "📘 ふつう", value: "intermediate（ふつう）でお願いします" },
+        { label: "🔥 むずかしい", value: "hard（むずかしい）でお願いします" },
+      ];
+    }
+
+    return [];
+  };
+
+  const getStatusIcon = (eventType: string) => {
+    switch (eventType) {
+      case "thinking":
         return "🚀";
-      case "executing":
+      case "tool_call":
         return "⚡";
+      case "tool_result":
+        return "✓";
+      case "response":
       case "completed":
         return "✓";
-      case "failed":
+      case "error":
         return "✗";
       default:
         return "•";
     }
   };
 
-  const getActionLabel = (action: string) => {
-    switch (action) {
+  const getActionLabel = (eventType: string) => {
+    switch (eventType) {
       case "thinking":
         return "思考中";
       case "tool_call":
@@ -102,10 +155,12 @@ export function ChatPage() {
         return "ツール結果";
       case "response":
         return "回答生成";
+      case "completed":
+        return "完了";
       case "error":
         return "エラー";
       default:
-        return action;
+        return eventType;
     }
   };
 
@@ -166,25 +221,45 @@ export function ChatPage() {
               </div>
             ) : (
               <>
-                {messages.map((msg, i) => (
-                  <div key={i} className={`message ${msg.role}`}>
-                    {msg.role === "assistant" && (
-                      <span className="message-avatar">🎓</span>
-                    )}
-                    <div className="message-content">
-                      {msg.content}
-                      {msg.tool_calls && msg.tool_calls.length > 0 && (
-                        <div className="tool-calls">
-                          {msg.tool_calls.map((tc, j) => (
-                            <span key={j} className="tool-call-badge">
-                              🔧 {tc.name}
-                            </span>
-                          ))}
-                        </div>
+                {messages.map((msg, i) => {
+                  const isLastAssistant = msg.role === "assistant" && i === messages.length - 1;
+                  const quickReplies = msg.role === "assistant"
+                    ? detectQuickReplies(msg.content, isLastAssistant)
+                    : [];
+                  return (
+                    <div key={i} className={`message ${msg.role}`}>
+                      {msg.role === "assistant" && (
+                        <span className="message-avatar">🎓</span>
                       )}
+                      <div className="message-content">
+                        {msg.content}
+                        {msg.toolCalls && msg.toolCalls.length > 0 && (
+                          <div className="tool-calls">
+                            {msg.toolCalls.map((tc, j) => (
+                              <span key={j} className="tool-call-badge">
+                                🔧 {tc}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {quickReplies.length > 0 && (
+                          <div className="quick-replies">
+                            {quickReplies.map((qr, j) => (
+                              <button
+                                key={j}
+                                className="quick-reply-btn"
+                                onClick={() => sendMessage(qr.value)}
+                                disabled={isLoading}
+                              >
+                                {qr.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {isLoading && (
                   <div className="message assistant">
                     <span className="message-avatar">🎓</span>
@@ -218,18 +293,18 @@ export function ChatPage() {
             <h4>エージェント活動</h4>
             <div className="activity-timeline">
               {activities.map((activity, i) => (
-                <div key={i} className={`activity-item ${activity.status}`}>
+                <div key={i} className={`activity-item ${activity.event_type}`}>
                   <span className="activity-status">
-                    {getStatusIcon(activity.status)}
+                    {getStatusIcon(activity.event_type)}
                   </span>
                   <div className="activity-details">
                     <div className="activity-header">
-                      <span className="activity-agent">{activity.agent}</span>
+                      <span className="activity-agent">{activity.agent_name}</span>
                       <span className="activity-action">
-                        {getActionLabel(activity.action)}
+                        {getActionLabel(activity.event_type)}
                       </span>
                     </div>
-                    <p className="activity-message">{activity.message}</p>
+                    <p className="activity-message">{activity.content}</p>
                   </div>
                 </div>
               ))}

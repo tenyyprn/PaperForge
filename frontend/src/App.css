@@ -656,6 +656,34 @@
   font-size: 0.75rem;
 }
 
+.quick-replies {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.quick-reply-btn {
+  background: rgba(79, 70, 229, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(79, 70, 229, 0.3);
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-reply-btn:hover:not(:disabled) {
+  background: rgba(79, 70, 229, 0.3);
+  border-color: rgba(79, 70, 229, 0.5);
+}
+
+.quick-reply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .chat-input {
   display: flex;
   gap: 0.5rem;
