@@ -2,6 +2,7 @@
 
 import os
 import json
+import time
 from typing import Any
 
 
@@ -15,6 +16,19 @@ def _get_genai_client():
     if project:
         return genai.Client(vertexai=True, project=project, location="us-central1")
     return None
+
+
+def _call_with_retry(client, **kwargs) -> str:
+    """リトライ付きで Gemini API を呼び出す"""
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(**kwargs)
+            return response.text
+        except Exception as e:
+            if ("429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)) and attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            raise
 
 
 def explain_concept(
@@ -61,12 +75,13 @@ JSON形式で出力:
 }}"""
 
     try:
-        response = client.models.generate_content(
+        text = _call_with_retry(
+            client,
             model="gemini-2.0-flash",
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             config={"response_mime_type": "application/json"},
         )
-        return json.loads(response.text)
+        return json.loads(text)
     except Exception as e:
         return {
             "explanation": concept_definition,
@@ -149,12 +164,13 @@ JSON形式で出力:
 }}"""
 
     try:
-        response = client.models.generate_content(
+        text = _call_with_retry(
+            client,
             model="gemini-2.0-flash",
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             config={"response_mime_type": "application/json"},
         )
-        return json.loads(response.text)
+        return json.loads(text)
     except Exception as e:
         return {
             "questions": [],
@@ -229,12 +245,13 @@ JSON形式で出力:
 }}"""
 
     try:
-        response = client.models.generate_content(
+        text = _call_with_retry(
+            client,
             model="gemini-2.0-flash",
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             config={"response_mime_type": "application/json"},
         )
-        return json.loads(response.text)
+        return json.loads(text)
     except Exception as e:
         return {
             "learning_path": [],
@@ -300,12 +317,13 @@ JSON形式で出力:
 }}"""
 
     try:
-        response = client.models.generate_content(
+        text = _call_with_retry(
+            client,
             model="gemini-2.0-flash",
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             config={"response_mime_type": "application/json"},
         )
-        return json.loads(response.text)
+        return json.loads(text)
     except Exception as e:
         return {
             "suggestions": [],

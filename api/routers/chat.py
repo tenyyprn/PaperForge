@@ -394,16 +394,29 @@ async def chat(request: ChatRequest):
         )
 
     except Exception as e:
+        error_str = str(e)
         activities.append(AgentActivity(
             agent="Tutor Agent",
             action="error",
             status="failed",
-            message=str(e),
+            message=error_str,
         ))
+
+        # ユーザーフレンドリーなエラーメッセージ
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            error_message = (
+                "APIのレート制限に達しました。少し時間を置いてから再度お試しください。\n\n"
+                "（Gemini API の無料枠には1分あたりのリクエスト数に制限があります）"
+            )
+        elif "400" in error_str or "INVALID_ARGUMENT" in error_str:
+            error_message = "リクエスト形式にエラーがありました。もう一度お試しください。"
+        else:
+            error_message = f"エラーが発生しました: {error_str}"
+
         return ChatResponse(
             message=ChatMessage(
                 role="assistant",
-                content=f"エラーが発生しました: {str(e)}",
+                content=error_message,
             ),
             activities=activities,
         )
