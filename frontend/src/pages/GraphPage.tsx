@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import ForceGraph2D from "react-force-graph-2d";
 import {
   useGraphStore,
@@ -50,6 +51,7 @@ interface Link2D extends Omit<GraphLink, "source" | "target"> {
 }
 
 export function GraphPage() {
+  const navigate = useNavigate();
   const { concepts, relations, getGraphData, clearGraph } = useGraphStore();
   const { papers } = usePaperStore();
   const graphData = getGraphData();
@@ -66,7 +68,7 @@ export function GraphPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  // chatMessages は ChatPage で管理するため不要
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [explorationMode, setExplorationMode] = useState(false);
   const [colorMode, setColorMode] = useState<"type" | "paper">("type");
@@ -277,7 +279,7 @@ export function GraphPage() {
     });
   };
 
-  // 選択した概念についてAIに質問
+  // 選択した概念についてAIに質問（ChatPageへ遷移）
   const askAboutConcept = (concept: GraphNode) => {
     const relatedConcepts = getConnectedNodesAndLinks(concept.id);
     const relatedNames = Array.from(relatedConcepts.nodes)
@@ -290,33 +292,13 @@ export function GraphPage() {
     const question = `「${concept.name_ja || concept.name}」について詳しく教えてください。${
       relatedNames.length > 0 ? `関連する概念: ${relatedNames.join(", ")}` : ""
     }`;
-    setChatInput(question);
-    setChatOpen(true);
+    navigate(`/chat?q=${encodeURIComponent(question)}`);
   };
 
-  // チャット送信（シンプルなモック）
+  // チャット送信（ChatPageへ遷移）
   const handleChatSend = () => {
     if (!chatInput.trim()) return;
-
-    setChatMessages((prev) => [...prev, { role: "user", content: chatInput }]);
-
-    // 実際のAI応答はバックエンドと連携する必要がある
-    // ここではコンテキストを示すモック応答
-    const contextInfo = selectedNode
-      ? `選択中の概念「${selectedNode.name_ja || selectedNode.name}」について`
-      : "ナレッジグラフ全体について";
-
-    setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `${contextInfo}のご質問ですね。\n\n現在のグラフには ${concepts.length} の概念と ${relations.length} の関係があります。\n\nより詳細な回答を得るには、チャットページで会話を続けてください。`,
-        },
-      ]);
-    }, 500);
-
-    setChatInput("");
+    navigate(`/chat?q=${encodeURIComponent(chatInput)}`);
   };
 
   // フィルタリングされたグラフデータ
@@ -823,21 +805,13 @@ export function GraphPage() {
                   <button onClick={() => setChatOpen(false)}>×</button>
                 </div>
                 <div className="chat-panel-messages">
-                  {chatMessages.length === 0 ? (
-                    <div className="chat-empty">
-                      {selectedNode ? (
-                        <p>「{selectedNode.name_ja || selectedNode.name}」について質問できます</p>
-                      ) : (
-                        <p>概念を選択してAIに質問しましょう</p>
-                      )}
-                    </div>
-                  ) : (
-                    chatMessages.map((msg, i) => (
-                      <div key={i} className={`chat-message ${msg.role}`}>
-                        {msg.content}
-                      </div>
-                    ))
-                  )}
+                  <div className="chat-empty">
+                    {selectedNode ? (
+                      <p>「{selectedNode.name_ja || selectedNode.name}」について質問できます</p>
+                    ) : (
+                      <p>概念を選択してAIに質問しましょう</p>
+                    )}
+                  </div>
                 </div>
                 <div className="chat-panel-input">
                   <input
@@ -847,7 +821,7 @@ export function GraphPage() {
                     onKeyDown={(e) => e.key === "Enter" && handleChatSend()}
                     placeholder="質問を入力..."
                   />
-                  <button onClick={handleChatSend}>送信</button>
+                  <button onClick={handleChatSend}>チャットで質問 →</button>
                 </div>
               </div>
             )}

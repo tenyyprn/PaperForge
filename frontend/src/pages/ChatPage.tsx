@@ -1,31 +1,30 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { sendChatMessage, type ChatMessage, type ChatActivityItem } from "../api/client";
 import { useGraphStore } from "../stores/graphStore";
 
 export function ChatPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [activities, setActivities] = useState<ChatActivityItem[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasAutoSent = useRef(false);
   const { concepts } = useGraphStore();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  // メッセージ送信の共通ロジック
+  const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim() || isLoading) return;
 
-    const userMessage: ChatMessage = { role: "user", content: input };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInput("");
-    setIsLoading(true);
-    setActivities([]);
-
-    try {
+    const userMessage: ChatMessage = { role: "user", content: text };
+    setMessages((prev) => {
+      const newMessages = [...prev, userMessage];
+      // 非同期で API 呼び出し
       const chatConcepts = concepts.map((c) => ({
         name: c.name,
         name_ja: c.name_ja || "",
@@ -33,22 +32,39 @@ export function ChatPage() {
         definition_ja: c.definition_ja || "",
         concept_type: c.concept_type || "concept",
       }));
+      setIsLoading(true);
+      setActivities([]);
+      sendChatMessage(newMessages, chatConcepts)
+        .then((response) => {
+          setMessages((prev) => [...prev, response.message]);
+          setActivities(response.activities || []);
+        })
+        .catch(() => {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "エラーが発生しました。もう一度お試しください。" },
+          ]);
+        })
+        .finally(() => setIsLoading(false));
+      return newMessages;
+    });
+    setInput("");
+  }, [isLoading, concepts]);
 
-      const response = await sendChatMessage(newMessages, chatConcepts);
-      setMessages((prev) => [...prev, response.message]);
-      setActivities(response.activities || []);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "エラーが発生しました。もう一度お試しください。",
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
   };
+
+  // URLパラメータ ?q= から質問を自動送信（GraphPage等からの遷移）
+  useEffect(() => {
+    const question = searchParams.get("q");
+    if (question && !hasAutoSent.current) {
+      hasAutoSent.current = true;
+      setSearchParams({}, { replace: true });
+      sendMessage(question);
+    }
+  }, [searchParams, setSearchParams, sendMessage]);
 
   const suggestedQuestions = [
     "登録されている概念を説明して",
