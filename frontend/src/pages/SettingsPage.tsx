@@ -2,12 +2,14 @@ import { useState, useEffect } from "react";
 import { useGraphStore } from "../stores/graphStore";
 import { useLearningPathStore } from "../stores/learningPathStore";
 import { usePaperStore } from "../stores/paperStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { getGraphStats, setApiBaseUrl, apiClient } from "../api/client";
 
 export function SettingsPage() {
   const { concepts, relations, clearGraph } = useGraphStore();
   const { paths, clearPaths } = useLearningPathStore();
   const { papers, clearPapers } = usePaperStore();
+  const { defaultUploadDirectory, setDefaultUploadDirectory } = useSettingsStore();
   const [apiUrl, setApiUrl] = useState(
     localStorage.getItem("apiUrl") || apiClient.defaults.baseURL || ""
   );
@@ -20,12 +22,37 @@ export function SettingsPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [directorySaved, setDirectorySaved] = useState(false);
 
   useEffect(() => {
     getGraphStats()
       .then((stats) => setStorageType(stats.storage))
       .catch(() => setStorageType("error"));
   }, []);
+
+  const handleSelectDirectory = async () => {
+    try {
+      // File System Access API を使用してディレクトリを選択
+      if ('showDirectoryPicker' in window) {
+        const dirHandle = await (window as any).showDirectoryPicker();
+        // ディレクトリハンドルの名前（パス）を保存
+        setDefaultUploadDirectory(dirHandle.name);
+        setDirectorySaved(true);
+        setTimeout(() => setDirectorySaved(false), 2000);
+      } else {
+        alert('お使いのブラウザはディレクトリ選択機能に対応していません。Chrome または Edge をご使用ください。');
+      }
+    } catch (err) {
+      // ユーザーがキャンセルした場合は何もしない
+      console.log('Directory selection cancelled');
+    }
+  };
+
+  const handleClearDirectory = () => {
+    setDefaultUploadDirectory('');
+    setDirectorySaved(true);
+    setTimeout(() => setDirectorySaved(false), 2000);
+  };
 
   const handleSaveApiUrl = () => {
     setApiBaseUrl(apiUrl);
@@ -154,6 +181,39 @@ export function SettingsPage() {
           ) : (
             <span className="storage-badge memory">ローカルのみ</span>
           )}
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="section-title">
+          <span className="section-icon">📁</span>
+          <div>
+            <h3>アップロード設定</h3>
+            <p className="section-desc">
+              論文アップロード時のデフォルトディレクトリ
+            </p>
+          </div>
+        </div>
+        <div className="setting-item">
+          <label htmlFor="default-directory">デフォルトディレクトリ</label>
+          <div className="directory-display">
+            {defaultUploadDirectory ? (
+              <div className="directory-info">
+                <span className="directory-path">📂 {defaultUploadDirectory}</span>
+                <button onClick={handleClearDirectory} className="clear-dir-btn">
+                  クリア
+                </button>
+              </div>
+            ) : (
+              <span className="directory-empty">未設定</span>
+            )}
+          </div>
+          <button onClick={handleSelectDirectory} className="select-dir-btn">
+            {directorySaved ? "保存しました" : "ディレクトリを選択"}
+          </button>
+          <p className="setting-hint">
+            ※ Chrome, Edge などモダンブラウザのみ対応しています
+          </p>
         </div>
       </section>
 

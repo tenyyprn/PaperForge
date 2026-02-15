@@ -218,7 +218,7 @@ JSON形式で出力:
     }
 
 
-async def run_quiz_task(concepts: list[dict], session_id: str) -> dict:
+async def run_quiz_task(concepts: list[dict], session_id: str, difficulty: str = "intermediate") -> dict:
     """クイズ生成タスクを実行"""
     activities = _sessions.get(session_id, [])
 
@@ -260,8 +260,14 @@ async def run_quiz_task(concepts: list[dict], session_id: str) -> dict:
         }
     else:
         # Gemini APIでクイズ生成
+        difficulty_labels = {
+            "easy": "基本的な理解を確認する簡単な",
+            "intermediate": "概念の正しい理解を確認する標準的な",
+            "hard": "深い理解と応用力を確認する難しい",
+        }
+        diff_text = difficulty_labels.get(difficulty, difficulty_labels["intermediate"])
         concepts_text = "\n".join(f"- {c['name']}: {c.get('definition', '')}" for c in concepts[:10])
-        prompt = f"""以下の概念に基づいて、理解度確認クイズを3問生成してください。
+        prompt = f"""以下の概念に基づいて、{diff_text}理解度確認クイズを3問生成してください。
 
 概念:
 {concepts_text}
@@ -503,11 +509,13 @@ async def start_pipeline(request: AgentRequest, background_tasks: BackgroundTask
             session_id,
         )
     elif request.task == "quiz":
+        quiz_difficulty = request.context.get("difficulty", "intermediate")
         background_tasks.add_task(
             _run_and_store,
             run_quiz_task,
             request.concepts,
             session_id,
+            quiz_difficulty,
         )
     else:
         background_tasks.add_task(
@@ -529,7 +537,8 @@ async def run_agent(request: AgentRequest):
     if request.task == "extract":
         result = await run_extraction_task(request.input, session_id)
     elif request.task == "quiz":
-        result = await run_quiz_task(request.concepts, session_id)
+        quiz_difficulty = request.context.get("difficulty", "intermediate")
+        result = await run_quiz_task(request.concepts, session_id, quiz_difficulty)
     elif request.task == "pipeline":
         result = await run_pipeline_task(
             request.input,

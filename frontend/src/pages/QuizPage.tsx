@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useGraphStore } from "../stores/graphStore";
+import { useGraphStore, CONCEPT_TYPE_COLORS, CONCEPT_TYPE_LABELS, type ConceptType } from "../stores/graphStore";
 import {
   runAgent,
   type AgentActivity,
@@ -16,9 +16,25 @@ export function QuizPage() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [score, setScore] = useState(0);
+  const [difficulty, setDifficulty] = useState<"easy" | "intermediate" | "hard">("intermediate");
+  const [selectedConceptIds, setSelectedConceptIds] = useState<Set<string>>(new Set(concepts.map(c => c.id)));
+
+  const toggleConcept = (id: string) => {
+    setSelectedConceptIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedConceptIds(new Set(concepts.map(c => c.id)));
+  const deselectAll = () => setSelectedConceptIds(new Set());
+
+  const selectedConcepts = concepts.filter(c => selectedConceptIds.has(c.id));
 
   const handleGenerate = async () => {
-    if (concepts.length === 0) return;
+    if (selectedConcepts.length === 0) return;
 
     setIsLoading(true);
     setQuestions([]);
@@ -27,7 +43,7 @@ export function QuizPage() {
     setShowResult(false);
 
     try {
-      const response = await runAgent("quiz", "", concepts);
+      const response = await runAgent("quiz", "", selectedConcepts, { difficulty });
       setActivities(response.activities);
 
       const quizResult = response.result as { questions?: QuizQuestion[] };
@@ -86,16 +102,71 @@ export function QuizPage() {
         </div>
       ) : questions.length === 0 && !isLoading ? (
         <div className="quiz-start">
-          <div className="concept-info">
-            <span className="concept-count">{concepts.length}</span>
-            <span>個の概念からクイズを生成します</span>
+          <div className="concept-selector">
+            <div className="concept-selector-header">
+              <span className="concept-selector-title">
+                クイズ対象の概念（{selectedConcepts.length}/{concepts.length}）
+              </span>
+              <div className="concept-selector-actions">
+                <button className="select-action-btn" onClick={selectAll}>すべて選択</button>
+                <button className="select-action-btn" onClick={deselectAll}>すべて解除</button>
+              </div>
+            </div>
+            <div className="concept-chip-list">
+              {concepts.map(c => (
+                <button
+                  key={c.id}
+                  className={`concept-chip ${selectedConceptIds.has(c.id) ? "selected" : ""}`}
+                  onClick={() => toggleConcept(c.id)}
+                  style={{
+                    borderColor: selectedConceptIds.has(c.id)
+                      ? CONCEPT_TYPE_COLORS[(c.concept_type as ConceptType) || "concept"]
+                      : undefined,
+                  }}
+                >
+                  <span
+                    className="concept-chip-dot"
+                    style={{ background: CONCEPT_TYPE_COLORS[(c.concept_type as ConceptType) || "concept"] }}
+                  />
+                  <span className="concept-chip-name">{c.name_ja || c.name}</span>
+                  <span className="concept-chip-type">
+                    {CONCEPT_TYPE_LABELS[(c.concept_type as ConceptType) || "concept"]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="difficulty-selector">
+            <span className="difficulty-label">難易度</span>
+            <div className="difficulty-buttons">
+              <button
+                className={`difficulty-btn ${difficulty === "easy" ? "active" : ""}`}
+                onClick={() => setDifficulty("easy")}
+              >
+                かんたん
+              </button>
+              <button
+                className={`difficulty-btn ${difficulty === "intermediate" ? "active" : ""}`}
+                onClick={() => setDifficulty("intermediate")}
+              >
+                ふつう
+              </button>
+              <button
+                className={`difficulty-btn ${difficulty === "hard" ? "active" : ""}`}
+                onClick={() => setDifficulty("hard")}
+              >
+                むずかしい
+              </button>
+            </div>
           </div>
           <button
             onClick={handleGenerate}
-            disabled={isLoading}
+            disabled={isLoading || selectedConcepts.length === 0}
             className="generate-btn"
           >
-            クイズを生成
+            {selectedConcepts.length === 0
+              ? "概念を選択してください"
+              : `${selectedConcepts.length}個の概念からクイズを生成`}
           </button>
           <AgentActivityPanel activities={activities} />
         </div>

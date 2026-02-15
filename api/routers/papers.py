@@ -88,7 +88,10 @@ class PaperSummary(BaseModel):
     development: str = ""
     turn: str = ""
     conclusion: str = ""
-    easy_explanation: str = ""
+    middle_school_explanation: str = ""  # 中学生向け
+    high_school_explanation: str = ""  # 高校生向け
+    university_explanation: str = ""  # 大学生向け
+    researcher_explanation: str = ""  # 研究者向け
 
 
 class PaperResponse(BaseModel):
@@ -113,7 +116,7 @@ EXTRACTION_PROMPT_TEMPLATE = """以下の論文テキストから、オントロ
 1. 論文のメタ情報（タイトル、著者、発表年）- 英語と日本語の両方
 2. 要約と主張 - 日本語で
 3. 起承転結の構造 - 日本語で
-4. 高校生向けのやさしい説明 - 日本語で
+4. 4段階の難易度別説明 - 日本語で（中学生、高校生、大学生、研究者向け）
 5. **オントロジー情報**：概念をタイプ分類し、意味的な関係を抽出 - 英語名と日本語名の両方
 
 ## 概念のタイプ（concept_type）：
@@ -154,7 +157,10 @@ EXTRACTION_PROMPT_TEMPLATE = """以下の論文テキストから、オントロ
     "development": "【承】提案手法や実験の説明（日本語）",
     "turn": "【転】重要な発見や意外な結果（日本語）",
     "conclusion": "【結】結論と今後の展望（日本語）",
-    "easy_explanation": "【高校生向け説明】この論文を高校生にもわかるように、身近な例えを使って説明してください（日本語、3-5文）"
+    "middle_school_explanation": "【中学生向け説明】身近な例えを多く使い、専門用語を避けてわかりやすく（日本語、3-5文）",
+    "high_school_explanation": "【高校生向け説明】基本的な科学知識を前提に、具体例を交えて説明（日本語、3-5文）",
+    "university_explanation": "【大学生向け説明】専門用語を使いつつ、論文の技術的な貢献を明確に説明（日本語、3-5文）",
+    "researcher_explanation": "【研究者向け説明】技術的詳細と学術的意義、既存研究との位置づけを含めて説明（日本語、3-5文）"
   }},
   "concepts": [
     {{
@@ -319,7 +325,10 @@ async def upload_paper(file: UploadFile = File(...)):
         development=summary_data.get("development", ""),
         turn=summary_data.get("turn", ""),
         conclusion=summary_data.get("conclusion", ""),
-        easy_explanation=summary_data.get("easy_explanation", ""),
+        middle_school_explanation=summary_data.get("middle_school_explanation", ""),
+        high_school_explanation=summary_data.get("high_school_explanation", ""),
+        university_explanation=summary_data.get("university_explanation", ""),
+        researcher_explanation=summary_data.get("researcher_explanation", ""),
     ) if summary_data else None
 
     return PaperResponse(

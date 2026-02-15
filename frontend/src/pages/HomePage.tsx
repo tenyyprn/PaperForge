@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { uploadPaper, startPipeline, streamActivities, type PaperResponse, type AgentActivity } from "../api/client";
 import { useGraphStore, CONCEPT_TYPE_COLORS, CONCEPT_TYPE_LABELS, type ConceptType } from "../stores/graphStore";
 import { usePaperStore, createPaperFromResponse } from "../stores/paperStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { AgentActivityPanel } from "../components/AgentActivity";
 
 type Status = "idle" | "uploading" | "success" | "error";
+
+type ExplanationLevel = "middle_school" | "high_school" | "university" | "researcher";
 
 export function HomePage() {
   const [file, setFile] = useState<File | null>(null);
@@ -16,10 +19,13 @@ export function HomePage() {
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [activities, setActivities] = useState<AgentActivity[]>([]);
   const [pipelineResult, setPipelineResult] = useState<string>("");
+  const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>("high_school");
   const { addConcepts, addRelations } = useGraphStore();
   const { addPaper } = usePaperStore();
+  const { defaultUploadDirectory } = useSettingsStore();
   const navigate = useNavigate();
   const eventSourceRef = useRef<EventSource | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -33,6 +39,48 @@ export function HomePage() {
       setStatus("idle");
       setResult(null);
       setError(null);
+    }
+  };
+
+  const handleFileSelect = async () => {
+    try {
+      // File System Access API をサポートしているか確認
+      if ('showOpenFilePicker' in window) {
+        const opts: any = {
+          types: [
+            {
+              description: 'Documents',
+              accept: {
+                'application/pdf': ['.pdf'],
+                'text/plain': ['.txt'],
+              },
+            },
+          ],
+          multiple: false,
+        };
+
+        // デフォルトディレクトリが設定されている場合、そこから開始
+        // ※ ディレクトリ名のみでは開始位置を指定できないため、
+        //    ブラウザが最後に使用したディレクトリを記憶する動作に依存します
+        if (defaultUploadDirectory) {
+          // File System Access API では特定パスを直接指定できないため、
+          // ブラウザのデフォルト動作（最後に使用した場所）を利用
+          console.log('Default directory hint:', defaultUploadDirectory);
+        }
+
+        const [fileHandle] = await (window as any).showOpenFilePicker(opts);
+        const selectedFile = await fileHandle.getFile();
+        setFile(selectedFile);
+        setStatus("idle");
+        setResult(null);
+        setError(null);
+      } else {
+        // File System Access API 非対応の場合、通常のfile inputを使用
+        fileInputRef.current?.click();
+      }
+    } catch (err) {
+      // ユーザーがキャンセルした場合は何もしない
+      console.log('File selection cancelled');
     }
   };
 
@@ -99,20 +147,27 @@ export function HomePage() {
 
       <section className="upload-section">
         <h3>論文をアップロード</h3>
+        {defaultUploadDirectory && (
+          <p className="upload-hint">
+            📁 デフォルトディレクトリ: {defaultUploadDirectory}
+          </p>
+        )}
         <div className="upload-area">
           <input
+            ref={fileInputRef}
             type="file"
             accept=".pdf,.txt"
             onChange={handleFileChange}
             id="file-input"
+            style={{ display: 'none' }}
           />
-          <label htmlFor="file-input" className="file-label">
+          <button onClick={handleFileSelect} className="file-label">
             <span className="file-icon">📄</span>
             <span className="file-text">
               {file ? file.name : "クリックしてファイルを選択"}
             </span>
             <span className="file-hint">PDF または TXT ファイル</span>
-          </label>
+          </button>
           <button
             onClick={handleUpload}
             disabled={!file || status === "uploading"}
@@ -213,12 +268,43 @@ export function HomePage() {
                   </div>
                 </div>
 
-                {result.summary.easy_explanation && (
-                  <div className="summary-section easy-explanation">
-                    <h5>高校生向けやさしい説明</h5>
-                    <p>{result.summary.easy_explanation}</p>
+                <div className="summary-section explanation-section">
+                  <div className="explanation-header">
+                    <h5>わかりやすい説明</h5>
+                    <div className="explanation-level-selector">
+                      <button
+                        className={`level-btn ${explanationLevel === "middle_school" ? "active" : ""}`}
+                        onClick={() => setExplanationLevel("middle_school")}
+                      >
+                        中学生
+                      </button>
+                      <button
+                        className={`level-btn ${explanationLevel === "high_school" ? "active" : ""}`}
+                        onClick={() => setExplanationLevel("high_school")}
+                      >
+                        高校生
+                      </button>
+                      <button
+                        className={`level-btn ${explanationLevel === "university" ? "active" : ""}`}
+                        onClick={() => setExplanationLevel("university")}
+                      >
+                        大学生
+                      </button>
+                      <button
+                        className={`level-btn ${explanationLevel === "researcher" ? "active" : ""}`}
+                        onClick={() => setExplanationLevel("researcher")}
+                      >
+                        研究者
+                      </button>
+                    </div>
                   </div>
-                )}
+                  <p className="explanation-text">
+                    {explanationLevel === "middle_school" && result.summary.middle_school_explanation}
+                    {explanationLevel === "high_school" && result.summary.high_school_explanation}
+                    {explanationLevel === "university" && result.summary.university_explanation}
+                    {explanationLevel === "researcher" && result.summary.researcher_explanation}
+                  </p>
+                </div>
               </div>
             )}
 

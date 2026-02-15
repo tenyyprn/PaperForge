@@ -32,7 +32,10 @@ export interface PaperSummary {
   development: string;
   turn: string;
   conclusion: string;
-  easy_explanation: string;
+  middle_school_explanation: string;
+  high_school_explanation: string;
+  university_explanation: string;
+  researcher_explanation: string;
 }
 
 export interface PaperResponse {

@@ -4,6 +4,7 @@ import { useGraphStore, CONCEPT_TYPE_COLORS, CONCEPT_TYPE_LABELS, type ConceptTy
 import { sendChatMessage, type ChatMessage, type ChatConcept } from "../api/client";
 
 type CompareView = "cards" | "table" | "ai";
+type ExplanationLevel = "middle_school" | "high_school" | "university" | "researcher";
 
 export function PapersPage() {
   const { papers, removePaper, clearPapers } = usePaperStore();
@@ -13,6 +14,7 @@ export function PapersPage() {
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
   const [compareMode, setCompareMode] = useState(false);
   const [compareView, setCompareView] = useState<CompareView>("cards");
+  const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>("high_school");
 
   const handleClearAll = () => {
     if (confirm("すべての論文を削除しますか？\n（ナレッジグラフの概念は削除されません）")) {
@@ -606,12 +608,43 @@ ${sharedNames ? `共通概念: ${sharedNames}` : ""}
               </div>
             </div>
 
-            {selectedPaper.summary.easy_explanation && (
-              <div className="detail-section easy">
-                <h4>やさしい説明</h4>
-                <p>{selectedPaper.summary.easy_explanation}</p>
+            <div className="detail-section explanation-section">
+              <div className="explanation-header">
+                <h4>わかりやすい説明</h4>
+                <div className="explanation-level-selector">
+                  <button
+                    className={`level-btn ${explanationLevel === "middle_school" ? "active" : ""}`}
+                    onClick={() => setExplanationLevel("middle_school")}
+                  >
+                    中学生
+                  </button>
+                  <button
+                    className={`level-btn ${explanationLevel === "high_school" ? "active" : ""}`}
+                    onClick={() => setExplanationLevel("high_school")}
+                  >
+                    高校生
+                  </button>
+                  <button
+                    className={`level-btn ${explanationLevel === "university" ? "active" : ""}`}
+                    onClick={() => setExplanationLevel("university")}
+                  >
+                    大学生
+                  </button>
+                  <button
+                    className={`level-btn ${explanationLevel === "researcher" ? "active" : ""}`}
+                    onClick={() => setExplanationLevel("researcher")}
+                  >
+                    研究者
+                  </button>
+                </div>
               </div>
-            )}
+              <p className="explanation-text">
+                {explanationLevel === "middle_school" && selectedPaper.summary.middle_school_explanation}
+                {explanationLevel === "high_school" && selectedPaper.summary.high_school_explanation}
+                {explanationLevel === "university" && selectedPaper.summary.university_explanation}
+                {explanationLevel === "researcher" && selectedPaper.summary.researcher_explanation}
+              </p>
+            </div>
 
             <div className="detail-section concepts">
               <h4>抽出された概念 ({selectedPaper.conceptIds.length})</h4>
